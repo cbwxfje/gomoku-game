@@ -31,12 +31,35 @@ class GomokuGame {
         this.gameOver = false; // 游戏是否结束
         this.winner = null; // 获胜者
 
+        // 设置Canvas的实际绘制尺寸
+        this.initCanvasSize();
         // 初始化棋盘
         this.initBoard();
         // 绘制棋盘
         this.drawBoard();
         // 绑定事件监听器
         this.bindEvents();
+    }
+
+    /**
+     * 初始化Canvas尺寸
+     * 设置Canvas的实际绘制尺寸与显示尺寸一致，避免坐标转换问题
+     */
+    initCanvasSize() {
+        // 获取Canvas的显示尺寸
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+
+        // 设置Canvas的实际绘制尺寸（考虑设备像素比）
+        this.canvas.width = rect.width * dpr;
+        this.canvas.height = rect.height * dpr;
+
+        // 缩放绘图上下文以匹配设备像素比
+        this.ctx.scale(dpr, dpr);
+
+        // 保存显示尺寸，用于坐标转换
+        this.displayWidth = rect.width;
+        this.displayHeight = rect.height;
     }
 
     /**
@@ -51,14 +74,25 @@ class GomokuGame {
      * 绘制棋盘背景和网格线
      */
     drawBoard() {
-        const { ctx, canvas } = this;
+        const { ctx, displayWidth, displayHeight } = this;
+
+        // 计算动态的单元格大小和边距
+        const minSize = Math.min(displayWidth, displayHeight);
+        const padding = minSize * 0.05; // 边距为画布的5%
+        const cellSize = (minSize - padding * 2) / (BOARD_SIZE - 1);
+        const pieceRadius = cellSize * 0.4; // 棋子半径为单元格的40%
+
+        // 保存这些值供其他方法使用
+        this.padding = padding;
+        this.cellSize = cellSize;
+        this.pieceRadius = pieceRadius;
 
         // 清空画布
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
 
         // 绘制棋盘背景色（木纹色）
         ctx.fillStyle = '#DEB887';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
 
         // 绘制网格线
         ctx.strokeStyle = '#000';
@@ -66,19 +100,19 @@ class GomokuGame {
 
         // 绘制横线
         for (let i = 0; i < BOARD_SIZE; i++) {
-            const y = PADDING + i * CELL_SIZE;
+            const y = padding + i * cellSize;
             ctx.beginPath();
-            ctx.moveTo(PADDING, y);
-            ctx.lineTo(PADDING + (BOARD_SIZE - 1) * CELL_SIZE, y);
+            ctx.moveTo(padding, y);
+            ctx.lineTo(padding + (BOARD_SIZE - 1) * cellSize, y);
             ctx.stroke();
         }
 
         // 绘制竖线
         for (let i = 0; i < BOARD_SIZE; i++) {
-            const x = PADDING + i * CELL_SIZE;
+            const x = padding + i * cellSize;
             ctx.beginPath();
-            ctx.moveTo(x, PADDING);
-            ctx.lineTo(x, PADDING + (BOARD_SIZE - 1) * CELL_SIZE);
+            ctx.moveTo(x, padding);
+            ctx.lineTo(x, padding + (BOARD_SIZE - 1) * cellSize);
             ctx.stroke();
         }
 
@@ -90,7 +124,7 @@ class GomokuGame {
      * 绘制棋盘上的星位点（天元和四个角的标记点）
      */
     drawStarPoints() {
-        const { ctx } = this;
+        const { ctx, padding, cellSize } = this;
         const positions = [
             [7, 7],   // 天元（中心点）
             [3, 3],   // 左上星位
@@ -101,8 +135,8 @@ class GomokuGame {
 
         ctx.fillStyle = '#000';
         positions.forEach(([row, col]) => {
-            const x = PADDING + col * CELL_SIZE;
-            const y = PADDING + row * CELL_SIZE;
+            const x = padding + col * cellSize;
+            const y = padding + row * cellSize;
             ctx.beginPath();
             ctx.arc(x, y, 4, 0, 2 * Math.PI);
             ctx.fill();
@@ -116,14 +150,14 @@ class GomokuGame {
      * @param {number} player - 玩家类型（1:黑方, 2:白方）
      */
     drawPiece(row, col, player) {
-        const { ctx } = this;
-        const x = PADDING + col * CELL_SIZE;
-        const y = PADDING + row * CELL_SIZE;
+        const { ctx, padding, cellSize, pieceRadius } = this;
+        const x = padding + col * cellSize;
+        const y = padding + row * cellSize;
 
         // 创建径向渐变效果，使棋子更立体
         const gradient = ctx.createRadialGradient(
             x - 5, y - 5, 2,
-            x, y, PIECE_RADIUS
+            x, y, pieceRadius
         );
 
         if (player === PLAYER.BLACK) {
@@ -139,7 +173,7 @@ class GomokuGame {
         // 绘制棋子
         ctx.fillStyle = gradient;
         ctx.beginPath();
-        ctx.arc(x, y, PIECE_RADIUS, 0, 2 * Math.PI);
+        ctx.arc(x, y, pieceRadius, 0, 2 * Math.PI);
         ctx.fill();
 
         // 绘制棋子边框
@@ -164,7 +198,7 @@ class GomokuGame {
 
     /**
      * 处理点击事件
-     * @param {MouseEvent} event - 鼠标点击事件
+     * @param {MouseEvent|Touch} event - 鼠标点击事件或触摸事件
      */
     handleClick(event) {
         // 如果游戏已结束，不允许继续落子
@@ -175,9 +209,9 @@ class GomokuGame {
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
 
-        // 将像素坐标转换为棋盘坐标
-        const col = Math.round((x - PADDING) / CELL_SIZE);
-        const row = Math.round((y - PADDING) / CELL_SIZE);
+        // 将像素坐标转换为棋盘坐标，使用动态计算的padding和cellSize
+        const col = Math.round((x - this.padding) / this.cellSize);
+        const row = Math.round((y - this.padding) / this.cellSize);
 
         // 检查坐标是否在棋盘范围内
         if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) {
@@ -299,6 +333,10 @@ class GomokuGame {
      */
     updateCurrentPlayerDisplay() {
         const playerDisplay = document.getElementById('currentPlayer');
+        if (!playerDisplay) {
+            console.error('找不到currentPlayer元素');
+            return;
+        }
         playerDisplay.textContent = this.currentPlayer === PLAYER.BLACK ? '黑方' : '白方';
         playerDisplay.style.color = this.currentPlayer === PLAYER.BLACK ? '#000' : '#666';
     }
@@ -308,6 +346,10 @@ class GomokuGame {
      */
     showWinner() {
         const statusElement = document.getElementById('gameStatus');
+        if (!statusElement) {
+            console.error('找不到gameStatus元素');
+            return;
+        }
         const winnerName = this.winner === PLAYER.BLACK ? '黑方' : '白方';
         statusElement.textContent = `🎉 ${winnerName}获胜！`;
         statusElement.className = 'game-status winner';
@@ -318,6 +360,10 @@ class GomokuGame {
      */
     showDraw() {
         const statusElement = document.getElementById('gameStatus');
+        if (!statusElement) {
+            console.error('找不到gameStatus元素');
+            return;
+        }
         statusElement.textContent = '平局！棋盘已满。';
         statusElement.className = 'game-status';
     }
@@ -331,6 +377,9 @@ class GomokuGame {
         this.gameOver = false;
         this.winner = null;
 
+        // 重新初始化Canvas尺寸（处理窗口大小变化）
+        this.initCanvasSize();
+
         // 重新初始化棋盘
         this.initBoard();
 
@@ -342,8 +391,10 @@ class GomokuGame {
 
         // 清空状态显示
         const statusElement = document.getElementById('gameStatus');
-        statusElement.textContent = '';
-        statusElement.className = 'game-status';
+        if (statusElement) {
+            statusElement.textContent = '';
+            statusElement.className = 'game-status';
+        }
     }
 
     /**
@@ -353,9 +404,35 @@ class GomokuGame {
         // 绑定画布点击事件
         this.canvas.addEventListener('click', (e) => this.handleClick(e));
 
+        // 绑定触摸事件（移动端支持）
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // 防止触发默认的滚动行为
+            const touch = e.touches[0];
+            // 将触摸事件转换为点击事件格式
+            this.handleClick({
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+        });
+
         // 绑定重新开始按钮事件
         const restartBtn = document.getElementById('restartBtn');
+        if (!restartBtn) {
+            console.error('找不到restartBtn元素');
+            return;
+        }
         restartBtn.addEventListener('click', () => this.reset());
+
+        // 绑定窗口大小变化事件（响应式支持）
+        window.addEventListener('resize', () => {
+            // 使用防抖，避免频繁重绘
+            clearTimeout(this.resizeTimeout);
+            this.resizeTimeout = setTimeout(() => {
+                this.initCanvasSize();
+                this.drawBoard();
+                this.redrawAllPieces();
+            }, 250);
+        });
     }
 }
 
@@ -365,6 +442,10 @@ class GomokuGame {
  */
 function initGame() {
     const canvas = document.getElementById('gameCanvas');
+    if (!canvas) {
+        console.error('找不到gameCanvas元素');
+        return;
+    }
     const game = new GomokuGame(canvas);
 }
 
@@ -374,6 +455,3 @@ if (document.readyState === 'loading') {
 } else {
     initGame();
 }
-
-// 导出游戏类（遵循ES模块规范）
-export { GomokuGame, PLAYER, BOARD_SIZE };
